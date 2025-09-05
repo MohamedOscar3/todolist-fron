@@ -85,7 +85,9 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
   fetchGroupedTasks: async (perPage = 10, keyword?: string) => {
     set({ isLoadingGrouped: true });
     try {
+      console.log('Fetching grouped tasks with perPage:', perPage, 'keyword:', keyword);
       const response = await taskService.getAllTasksGrouped(perPage, keyword);
+      console.log('API Response for grouped tasks:', response);
 
       // Initialize default grouped tasks structure
       const defaultGroupedTasks: GroupedTasks = {
@@ -117,6 +119,7 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
 
         // If the API returns a flat list of tasks, group them by stage
         if (Array.isArray(response.data)) {
+          console.log('API returned a flat array of tasks, grouping by stage');
           const tasks = response.data as Task[];
 
           // Group tasks by stage
@@ -134,6 +137,7 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
 
           groupedData = defaultGroupedTasks;
         } else if (typeof response.data === 'object' && !Array.isArray(response.data)) {
+          console.log('API returned a grouped tasks object');
           // Ensure all expected stages exist in the response
           groupedData = {
             ...defaultGroupedTasks,
@@ -144,28 +148,23 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
           groupedData = defaultGroupedTasks;
         }
 
-        // Check if there are more pages to load
-        const hasMorePages = Object.values(groupedData).some(
-          group => group.meta.current_page < group.meta.last_page
-        );
-        
+        console.log('Final grouped tasks data:', groupedData);
         set({
           groupedTasks: groupedData,
-          hasMore: hasMorePages,
           isLoadingGrouped: false,
           error: null,
         });
       } else {
+        console.error('Failed to fetch grouped tasks:', response.message);
         set({
           error: response.message || 'Failed to fetch grouped tasks',
-          hasMore: false,
           isLoadingGrouped: false,
         });
       }
     } catch (error: any) {
+      console.error('Error fetching grouped tasks:', error);
       set({
         error: error.response?.data?.message || 'Failed to fetch grouped tasks',
-        hasMore: false,
         isLoadingGrouped: false,
       });
     }
@@ -176,64 +175,21 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
     try {
       const response = await taskService.getTasksByStage(stage, page);
 
-      // Handle different response structures
-      let tasksData: any[] = [];
-      let metaData: any = {};
-
-      if (response.success && response.data) {
-        // Check if response.data is an array or has a nested structure
-        if (Array.isArray(response.data)) {
-          tasksData = response.data;
-          metaData = response.meta || {};
-        } else if (response.data.data && Array.isArray(response.data.data)) {
-          // Handle paginated response structure
-          tasksData = response.data.data;
-          metaData = response.data.meta || response.meta || {};
-        } else if (response.data[stage]) {
-          // Handle grouped response structure
-          const stageData = response.data[stage];
-          if (Array.isArray(stageData)) {
-            tasksData = stageData;
-            metaData = response.meta || {};
-          } else if (stageData.tasks && Array.isArray(stageData.tasks)) {
-            // Handle nested structure like {review: {tasks: [...], meta: {...}}}
-            tasksData = stageData.tasks;
-            metaData = stageData.meta || response.meta || {};
-          } else {
-            tasksData = [];
-            metaData = {};
-          }
-        } else {
-          tasksData = [];
-          metaData = {};
-        }
-      }
-
       // Update the specific stage in groupedTasks
       const currentTasks = get().groupedTasks[stage]?.tasks || [];
-      const newTasks = page === 1 ? tasksData : [...currentTasks, ...tasksData];
+      const newTasks = page === 1 ? response.data : [...currentTasks, ...response.data];
 
-      set(state => {
-        // Also update the main tasks array with new tasks
-        const existingTaskIds = new Set(state.tasks.map(t => t.id));
-        const newTasksToAdd = tasksData.filter(task => !existingTaskIds.has(task.id));
-        
-        return {
-          tasks: [...state.tasks, ...newTasksToAdd], // Add new tasks to main array
-          groupedTasks: {
-            ...state.groupedTasks,
-            [stage]: {
-              ...state.groupedTasks[stage],
-              tasks: newTasks,
-              meta: {
-                ...metaData,
-                current_page: page, // Ensure we set the correct current page
-              },
-            },
+      set(state => ({
+        groupedTasks: {
+          ...state.groupedTasks,
+          [stage]: {
+            ...state.groupedTasks[stage],
+            tasks: newTasks,
+            meta: response.meta,
           },
-          isLoading: false,
-        };
-      });
+        },
+        isLoading: false,
+      }));
     } catch (error: any) {
       set({
         error: error.response?.data?.message || `Failed to fetch ${stage} tasks`,
@@ -407,31 +363,17 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
         index: position,
       };
 
+      console.log(`Updating task ${taskId} with:`, JSON.stringify(updateData));
       const response = await taskService.updateTask(taskId, updateData);
       const updatedTask = response.data;
 
       set(state => {
-        // Find the task to update - check both tasks array and groupedTasks
-        let oldTask = state.tasks.find(t => t.id === taskId);
-        let oldStage = oldTask?.stage;
-        
-        // If not found in tasks array, search in groupedTasks
-        if (!oldTask) {
-          for (const group of Object.values(state.groupedTasks)) {
-            const foundTask = group.tasks.find(t => t.id === taskId);
-            if (foundTask) {
-              oldTask = foundTask;
-              oldStage = foundTask.stage;
-              break;
-            }
-          }
-        }
-        
-        // Update the tasks array - add task if it doesn't exist
-        const taskExists = state.tasks.some(t => t.id === taskId);
-        const updatedTasks = taskExists 
-          ? state.tasks.map(t => (t.id === taskId ? updatedTask : t))
-          : [...state.tasks, updatedTask];
+        // Find the task to update
+        const oldTask = state.tasks.find(t => t.id === taskId);
+        const oldStage = oldTask?.stage;
+
+        // Update the tasks array
+        const updatedTasks = state.tasks.map(t => (t.id === taskId ? updatedTask : t));
 
         // If stage changed, we need to update both old and new stage groups
         if (oldStage && oldStage !== newStage) {
@@ -466,7 +408,6 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
                 tasks: newStageTasks,
               },
             },
-            isLoading: false,
           };
         } else {
           // Same stage, just reorder
@@ -479,11 +420,12 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
 
           // Insert at the new position
           if (typeof dropIndex === 'number' && dropIndex >= 0) {
-            // Adjust drop index if we removed an item before it
+            // If the task was removed from before the drop position, adjust the index
             const adjustedDropIndex =
               currentIndex !== -1 && currentIndex < dropIndex
                 ? Math.min(dropIndex - 1, stageTasks.length)
                 : Math.min(dropIndex, stageTasks.length);
+
             stageTasks.splice(adjustedDropIndex, 0, updatedTask);
           } else {
             // Default to adding at the beginning
@@ -499,7 +441,6 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
                 tasks: stageTasks,
               },
             },
-            isLoading: false,
           };
         }
       });
@@ -529,12 +470,15 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
     set({ isLoading: true });
 
     try {
+      console.log('Fetching more tasks for all stages');
+
       // Check if any stage has more pages to load
       const hasMorePages = Object.values(state.groupedTasks).some(
         group => group.meta.current_page < group.meta.last_page
       );
 
       if (!hasMorePages) {
+        console.log('No more pages to load for any stage');
         set({
           hasMore: false,
           isLoading: false,
@@ -547,10 +491,16 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
         ([_, group]) => group.meta.current_page < group.meta.last_page
       );
 
+      console.log(
+        'Stages with more pages:',
+        stagesWithMorePages.map(([stage]) => stage)
+      );
+
       // Fetch next page for each stage with more pages
       await Promise.all(
         stagesWithMorePages.map(async ([stage, group]) => {
           const nextPage = group.meta.current_page + 1;
+          console.log(`Fetching page ${nextPage} for stage ${stage}`);
 
           try {
             const response = await taskService.getTasksByStage(
@@ -559,45 +509,23 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
               group.meta.per_page
             );
 
-            // Handle different response structures
-            let responseData, responseMeta;
-            
             if (response.success && response.data) {
-              responseData = response.data;
-              responseMeta = response.meta;
-            } else if (response.data && Array.isArray(response.data)) {
-              responseData = response.data;
-              responseMeta = response.meta;
-            } else if (Array.isArray(response)) {
-              responseData = response;
-              responseMeta = null;
-            } else {
-              return;
-            }
-
-            if (responseData && responseData.length > 0) {
-              set(state => {
-                const updatedState = {
-                  groupedTasks: {
-                    ...state.groupedTasks,
-                    [stage]: {
-                      ...state.groupedTasks[stage],
-                      tasks: [...state.groupedTasks[stage].tasks, ...responseData],
-                      meta: responseMeta ? {
-                        ...responseMeta,
-                        current_page: nextPage,
-                      } : {
-                        ...state.groupedTasks[stage].meta,
-                        current_page: nextPage,
-                      },
+              set(state => ({
+                groupedTasks: {
+                  ...state.groupedTasks,
+                  [stage]: {
+                    ...state.groupedTasks[stage],
+                    tasks: [...state.groupedTasks[stage].tasks, ...response.data],
+                    meta: {
+                      ...response.meta,
+                      current_page: nextPage,
                     },
                   },
-                };
-                return updatedState;
-              });
+                },
+              }));
             }
           } catch (error) {
-            // Error handling is done at the function level
+            console.error(`Error fetching more tasks for stage ${stage}:`, error);
           }
         })
       );
@@ -613,6 +541,7 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
         isLoading: false,
       });
     } catch (error: any) {
+      console.error('Error in fetchMoreTasks:', error);
       set({
         error: error.response?.data?.message || 'Failed to fetch more tasks',
         isLoading: false,

@@ -30,34 +30,33 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, index, onEdit, onDelete, colu
   // Create a unique ID for this task
   const taskId = `task-${task.id.toString()}`;
   const cardRef = useRef<HTMLDivElement>(null);
-  
+
   // Set up draggable behavior
   React.useEffect(() => {
     if (!cardRef.current) return;
-    
+
+    console.log(`Setting up draggable for task: ${taskId}`);
+
     const cleanup = draggable({
       element: cardRef.current,
       dragHandle: cardRef.current,
       getInitialData: () => {
+        console.log(`Setting up draggable data for task ${task.id} in column ${columnId}`);
         return {
           taskId: task.id,
           type: 'task',
           index,
           sourceColumnId: columnId,
-          task: task
+          task: task,
         };
-      }
+      },
     });
-    
+
     return cleanup;
   }, [task.id, index, columnId, task]);
-  
+
   return (
-    <div
-      ref={cardRef}
-      className={`task-card`}
-      data-task-id={taskId}
-    >
+    <div ref={cardRef} className={`task-card`} data-task-id={taskId}>
       <Card.Body>
         <div className="task-card-header">
           <h5 className="task-title">{task.title}</h5>

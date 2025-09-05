@@ -24,7 +24,7 @@ const Column: React.FC<ColumnProps> = ({ title, stageTasks, stage, onEditTask, o
   // Ref to track the last loaded page to prevent duplicate requests
   const lastLoadedPageRef = useRef<number>(1);
   // Ref to debounce scroll events
-  const scrollTimeoutRef = useRef<number | null>(null);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const { fetchTasksByStage, isLoading } = useTaskStore();
   const tasks = stageTasks.tasks;
@@ -83,6 +83,7 @@ const Column: React.FC<ColumnProps> = ({ title, stageTasks, stage, onEditTask, o
     }
 
     // Update both the state and the ref
+    console.log('Setting drop index to:', dropIndex, 'for stage:', stage);
     setDropIndicatorIndex(dropIndex);
     dropIndicatorIndexRef.current = dropIndex;
   };
@@ -107,10 +108,15 @@ const Column: React.FC<ColumnProps> = ({ title, stageTasks, stage, onEditTask, o
       getData: () => {
         // Always return the most current drop index
         const dropIndex = dropIndicatorIndexRef.current ?? tasks.length;
-        return {
-          columnId: stage,
-          index: dropIndex,
-        };
+        console.log(
+          'Column getData called for stage:',
+          stage,
+          'dropIndex:',
+          dropIndex,
+          'ref value:',
+          dropIndicatorIndexRef.current
+        );
+        return { columnId: stage, dropIndex };
       },
       onDragEnter: () => {
         setIsDraggingOver(true);
@@ -160,11 +166,14 @@ const Column: React.FC<ColumnProps> = ({ title, stageTasks, stage, onEditTask, o
       if (scrollPercentage > 0.9 && nextPage > lastLoadedPageRef.current) {
         setIsLoadingMore(true);
         lastLoadedPageRef.current = nextPage;
-        
+
         try {
+          console.log(`Loading more tasks for ${stage}, page ${nextPage}`);
           await fetchTasksByStage(stage, nextPage);
         } catch (error) {
-          // Error handling is done in the store
+          console.error(`Error loading more tasks for ${stage}:`, error);
+          // Reset the last loaded page on error so it can be retried
+          lastLoadedPageRef.current = nextPage - 1;
         } finally {
           setIsLoadingMore(false);
         }
@@ -209,57 +218,57 @@ const Column: React.FC<ColumnProps> = ({ title, stageTasks, stage, onEditTask, o
         ref={scrollContainerRef}
         className={`task-column-content ${isDraggingOver ? 'dragging-over' : ''}`}
         data-column-id={stage}
-        style={{ 
-          maxHeight: '70vh', 
+        style={{
+          maxHeight: '70vh',
           overflowY: 'auto',
-          overflowX: 'hidden'
+          overflowX: 'hidden',
         }}>
         <div ref={columnRef}>
-        {tasks.length === 0 ? (
-          <div className="empty-column-placeholder">
-            <p>No tasks</p>
-            <p className="text-muted small">Drag tasks here</p>
-          </div>
-        ) : (
-          <>
-            {tasks.map((task, index) => {
-              // Show drop indicator before this item if needed
-              const showIndicatorBefore = dropIndicatorIndex === index;
+          {tasks.length === 0 ? (
+            <div className="empty-column-placeholder">
+              <p>No tasks</p>
+              <p className="text-muted small">Drag tasks here</p>
+            </div>
+          ) : (
+            <>
+              {tasks.map((task, index) => {
+                // Show drop indicator before this item if needed
+                const showIndicatorBefore = dropIndicatorIndex === index;
 
-              return (
-                <React.Fragment key={`fragment-${task.id}`}>
-                  {showIndicatorBefore && <div className="drop-indicator" />}
-                  <TaskCard
-                    key={`task-${task.id}`}
-                    task={task}
-                    index={task.index ?? 0}
-                    columnId={stage}
-                    onEdit={() => onEditTask(task)}
-                    onDelete={() => onDeleteTask(task.id)}
-                  />
-                </React.Fragment>
-              );
-            })}
+                return (
+                  <React.Fragment key={`fragment-${task.id}`}>
+                    {showIndicatorBefore && <div className="drop-indicator" />}
+                    <TaskCard
+                      key={`task-${task.id}`}
+                      task={task}
+                      index={task.index ?? 0}
+                      columnId={stage}
+                      onEdit={() => onEditTask(task)}
+                      onDelete={() => onDeleteTask(task.id)}
+                    />
+                  </React.Fragment>
+                );
+              })}
 
-            {/* Show indicator at the end if needed */}
-            {dropIndicatorIndex === tasks.length && <div className="drop-indicator" />}
-            
-            {/* Loading indicator for column infinite scroll */}
-            {isLoadingMore && (
-              <div className="d-flex justify-content-center py-3">
-                <Spinner animation="border" size="sm" />
-                <span className="ms-2 small">Loading page {meta.current_page + 1}...</span>
-              </div>
-            )}
-            
-            {/* End of list indicator */}
-            {!hasMorePages && tasks.length > 0 && (
-              <div className="text-center py-2 text-muted small">
-                All {meta.total} tasks loaded
-              </div>
-            )}
-          </>
-        )}
+              {/* Show indicator at the end if needed */}
+              {dropIndicatorIndex === tasks.length && <div className="drop-indicator" />}
+
+              {/* Loading indicator for column infinite scroll */}
+              {isLoadingMore && (
+                <div className="d-flex justify-content-center py-3">
+                  <Spinner animation="border" size="sm" />
+                  <span className="ms-2 small">Loading page {meta.current_page + 1}...</span>
+                </div>
+              )}
+
+              {/* End of list indicator */}
+              {!hasMorePages && tasks.length > 0 && (
+                <div className="text-center py-2 text-muted small">
+                  All {meta.total} tasks loaded
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
     </Card>
