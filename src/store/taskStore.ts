@@ -363,17 +363,31 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
         index: position,
       };
 
-      console.log(`Updating task ${taskId} with:`, JSON.stringify(updateData));
       const response = await taskService.updateTask(taskId, updateData);
       const updatedTask = response.data;
 
       set(state => {
-        // Find the task to update
-        const oldTask = state.tasks.find(t => t.id === taskId);
-        const oldStage = oldTask?.stage;
+        // Find the task to update - check both tasks array and groupedTasks
+        let oldTask = state.tasks.find(t => t.id === taskId);
+        let oldStage = oldTask?.stage;
+        
+        // If not found in tasks array, search in groupedTasks
+        if (!oldTask) {
+          for (const group of Object.values(state.groupedTasks)) {
+            const foundTask = group.tasks.find(t => t.id === taskId);
+            if (foundTask) {
+              oldTask = foundTask;
+              oldStage = foundTask.stage;
+              break;
+            }
+          }
+        }
 
-        // Update the tasks array
-        const updatedTasks = state.tasks.map(t => (t.id === taskId ? updatedTask : t));
+        // Update the tasks array - add task if it doesn't exist
+        const taskExists = state.tasks.some(t => t.id === taskId);
+        const updatedTasks = taskExists 
+          ? state.tasks.map(t => (t.id === taskId ? updatedTask : t))
+          : [...state.tasks, updatedTask];
 
         // If stage changed, we need to update both old and new stage groups
         if (oldStage && oldStage !== newStage) {
@@ -441,6 +455,7 @@ const useTaskStore = create<ExtendedTasksState>((set, get) => ({
                 tasks: stageTasks,
               },
             },
+            isLoading: false,
           };
         }
       });
